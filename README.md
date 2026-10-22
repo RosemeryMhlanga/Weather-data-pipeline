@@ -2,68 +2,61 @@
 
 ## Project Overview
 
-This project implements a maintainable weather data pipeline using Python, the Open-Meteo API, pandas, SQL, and SQLite.
+This project implements an end-to-end weather data engineering pipeline using Python, the Open-Meteo API, pandas, SQL, SQLite, and Apache Airflow.
 
-The pipeline extracts seven days of weather forecast data for Pretoria, Johannesburg, and Cape Town. It then transforms and validates the data before loading it into a SQLite database designed using a star schema.
+The pipeline extracts seven days of weather forecast data for Pretoria, Johannesburg, and Cape Town, performs data transformation and quality validation, and loads the results into a SQLite data warehouse designed using a star schema.
 
-The completed pipeline follows this process:
+The project supports two data integration architectures:
 
-```text
-Extract → Transform → Validate → Load
-```
+**ETL (Extract, Transform, Load)**
 
-The project demonstrates data engineering and software engineering practices such as modular programming, data transformation, data validation, database design, logging, and exception handling.
+`Extract → Transform → Validate → Load`
+
+**ELT (Extract, Load, Transform)**
+
+`Extract → Load to Staging → Transform → Validate → Load to Final Tables`
+
+Both workflows have been executed successfully. The ETL workflow is also orchestrated using Apache Airflow, with a daily schedule and task-level monitoring.
+
+The project demonstrates modular programming, REST API integration, data quality validation, dimensional modelling, SQL database operations, workflow orchestration, logging, and exception handling.
 
 ## Technologies Used
 
-* Python
-* pandas
-* requests
-* SQLite
-* SQL
-* pytest
-* Git
-* GitHub
-* Visual Studio Code
+- Python
+- pandas
+- requests
+- SQLite and SQL
+- Apache Airflow 3.3.2
+- Pendulum
+- Ubuntu 26.04.1 LTS through WSL2
+- pytest
+- Git and GitHub
+- Visual Studio Code
 
 ## Data Source
 
-The weather data is retrieved from the Open-Meteo Weather API.
+Weather data is retrieved from the Open-Meteo Weather API, which provides forecast data without requiring an API key.
 
-Open-Meteo provides weather forecast data without requiring an API key.
+The extracted attributes include weather codes, maximum and minimum temperatures, average temperature, precipitation, maximum wind speed, forecast dates, and geographic coordinates.
 
-The pipeline retrieves the following information:
+### Locations
 
-* Weather code
-* Maximum temperature
-* Minimum temperature
-* Average temperature
-* Precipitation
-* Maximum wind speed
-* Forecast date
-* Location coordinates
-
-## Locations
-
-The pipeline extracts weather data for the following South African cities:
-
-* Pretoria
-* Johannesburg
-* Cape Town
+The pipeline processes weather forecasts for Pretoria, Johannesburg, and Cape Town, South Africa.
 
 ## Project Structure
 
 ```text
-weather-data-pipeline/
+Weather-data-pipeline/
+│
+├── dags/
+│   └── weather_etl_dag.py
 │
 ├── data/
 │   ├── raw/
 │   │   └── weather_raw.json
+│   ├── processed/
+│   │   └── weather_transformed.csv
 │   └── weather.db
-│
-├── logs/
-│
-├── screenshots/
 │
 ├── sql/
 │   └── schema.sql
@@ -74,448 +67,344 @@ weather-data-pipeline/
 │   ├── transform.py
 │   ├── validate.py
 │   ├── load.py
-│   └── pipeline.py
+│   ├── etl.py
+│   ├── elt.py
+│   ├── pipeline.py
+│   ├── python_run_workflows.py
+│   └── check_database.py
 │
 ├── tests/
-│   ├── __init__.py
-│   ├── test_transform.py
-│   └── test_validation.py
-│
 ├── main.py
 ├── requirements.txt
 ├── README.md
 └── .gitignore
 ```
 
+The structure shows the main project components used during development. Airflow's installed DAG file and its Ubuntu configuration are maintained separately within the local WSL2 environment.
+
 ## ETL Pipeline
 
 ### 1. Extract
 
-The extraction stage connects to the Open-Meteo API using the Python `requests` library.
+The extraction stage requests forecast data from Open-Meteo for the three configured cities.
 
-The extraction process:
+The process checks API responses, handles connection failures, records extraction events and saves the raw JSON responses.
 
-* Sends a request to the Open-Meteo API
-* Extracts seven days of weather data
-* Extracts data for three locations
-* Checks whether the API request was successful
-* Checks whether the response contains daily weather data
-* Handles API connection errors
-* Logs successful and unsuccessful extraction events
-* Saves the original API response as a JSON file
+Source module: `src/extract.py`
 
-The raw API response is saved to:
-
-```text
-data/raw/weather_raw.json
-```
-
-The extraction code is stored in:
-
-```text
-src/extract.py
-```
+Raw output: `data/raw/weather_raw.json`
 
 ### 2. Transform
 
-The transformation stage converts the nested JSON response into a clean pandas DataFrame.
+The transformation stage converts nested API responses into structured pandas DataFrames containing one record per location and forecast date.
 
-The transformation process:
+The process includes:
 
-* Converts nested API data into rows and columns
-* Creates one row for each city and forecast date
-* Standardizes location names
-* Converts the observation date into datetime format
-* Converts weather measurements into numeric data types
-* Removes duplicate city and date records
-* Handles missing values in important fields
-* Sorts the data by city and date
-* Creates a derived average-temperature field
-* Prepares the data for fact and dimension tables
+- Flattening nested JSON records
+- Standardising location names
+- Converting dates and numeric measurements
+- Calculating average temperature
+- Removing duplicate location/date combinations
+- Handling missing critical values
+- Sorting records by location and observation date
 
-Average temperature is calculated using:
+Average temperature is calculated as:
 
-```text
-(maximum temperature + minimum temperature) / 2
-```
+`(temperature_max + temperature_min) / 2`
 
-The transformation code is stored in:
-
-```text
-src/transform.py
-```
+Source module: `src/transform.py`
 
 ### 3. Validate
 
-The validation stage checks the quality of the transformed data before it is loaded into the database.
+Before loading, the pipeline performs data quality checks, including required-column validation, null checks, duplicate detection, temperature-range validation, nonnegative precipitation and wind-speed checks, and date-type validation.
 
-The validation process checks that:
+Invalid datasets raise errors that prevent the normal loading sequence from proceeding.
 
-* The DataFrame is not empty
-* All required columns are present
-* Required columns do not contain missing values
-* Duplicate city and date records do not exist
-* Minimum temperature is not greater than maximum temperature
-* Precipitation is not negative
-* Wind speed is not negative
-* Observation dates use the correct datetime data type
-
-If any validation rule fails, the pipeline raises an error and stops before loading the data.
-
-The validation code is stored in:
-
-```text
-src/validate.py
-```
+Source module: `src/validate.py`
 
 ### 4. Load
 
-The load stage saves the validated weather data into a SQLite database.
+Validated records are loaded into the SQLite data warehouse.
 
-The database is saved to:
+The loading process creates the required tables and populates the location dimension, date dimension and weather fact table.
 
-```text
-data/weather.db
-```
+Source module: `src/load.py`
 
-The load process:
+Database: `data/weather.db`
 
-* Creates the database directory when required
-* Connects to SQLite
-* Reads the SQL schema file
-* Creates the database tables when they do not exist
-* Loads unique cities into the location dimension
-* Loads unique dates into the date dimension
-* Loads weather measurements into the fact table
-* Updates existing city and date records
-* Prevents duplicate weather records
-* Handles database connection and loading errors
-* Logs successful loading events
+## ELT Workflow
 
-The loading code is stored in:
+The project also implements an ELT workflow.
 
-```text
-src/load.py
-```
+Unlike ETL, which transforms data before loading, the ELT workflow first loads raw extracted data into a staging table.
 
-## Star Schema
+The sequence is:
 
-The SQLite database uses a star schema.
+1. Extract weather data from Open-Meteo.
+2. Load raw data into `staging_weather_raw`.
+3. Read staged weather records.
+4. Transform the staged responses into a structured DataFrame.
+5. Validate the transformed data.
+6. Load the results into the final dimensional tables.
 
-The schema contains:
+Source module: `src/elt.py`
 
-* One fact table
-* Two dimension tables
+Both ETL and ELT workflows were successfully executed from the Python project.
 
-The schema structure is:
+## Data Warehouse Design
 
-```text
-        dim_location
-             |
-             |
-        fact_weather
-             |
-             |
-          dim_date
-```
+The SQLite database uses a star-schema architecture with two dimension tables and one fact table.
 
-### Location Dimension
+### `dim_location`
 
-The `dim_location` table stores information describing each location.
+Stores unique location attributes, including location identifiers, location names, latitude and longitude.
 
-Columns:
+### `dim_date`
 
-* `location_id`
-* `location_name`
-* `latitude`
-* `longitude`
+Stores calendar attributes associated with forecast observation dates, including date identifiers, day, month, year and day of the week.
 
-Each city receives a unique `location_id`.
+### `fact_weather`
 
-### Date Dimension
+Stores measurable weather observations and foreign keys referencing the location and date dimensions.
 
-The `dim_date` table stores descriptive information about each forecast date.
+The fact table includes maximum temperature, minimum temperature, average temperature, precipitation, wind speed and weather code measurements.
 
-Columns:
+### Staging Table
 
-* `date_id`
-* `full_date`
-* `day`
-* `month`
-* `month_name`
-* `year`
-* `day_of_week`
+`staging_weather_raw` stores raw weather data used by the ELT workflow.
 
-The `date_id` uses the following format:
+The database also contains SQLite's internal `sqlite_sequence` table.
+
+The database is inspected using `src/check_database.py`.
+
+## Apache Airflow Orchestration
+
+### Overview
+
+Apache Airflow was successfully installed and configured on Ubuntu through Windows Subsystem for Linux 2 (WSL2).
+
+Airflow orchestrates the ETL pipeline as a Directed Acyclic Graph (DAG), managing execution order, scheduling, task monitoring and retries.
+
+**DAG ID:** `weather_etl_pipeline`
+
+**DAG file:** `dags/weather_etl_dag.py`
+
+**Airflow version:** 3.3.2
+
+**Scheduling frequency:** Daily
+
+**Configured timezone:** Africa/Johannesburg
+
+### DAG Tasks
+
+The workflow consists of four dependent tasks:
 
 ```text
-YYYYMMDD
+extract_weather
+      |
+      v
+transform_weather
+      |
+      v
+validate_weather
+      |
+      v
+load_weather
 ```
 
-Example:
+The extraction task retrieves the weather API responses. The transformation task prepares the data, the validation task checks its quality, and the loading task writes validated records to SQLite.
 
-```text
-20260624
+### Scheduling Configuration
+
+The DAG uses daily scheduling:
+
+```python
+schedule="@daily"
 ```
 
-### Weather Fact Table
+It is configured with:
 
-The `fact_weather` table stores the weather measurements.
+```python
+catchup=False
+max_active_runs=1
 
-Columns:
-
-* `weather_id`
-* `location_id`
-* `date_id`
-* `weather_code`
-* `temperature_max`
-* `temperature_min`
-* `average_temperature`
-* `precipitation`
-* `wind_speed_max`
-
-The `location_id` connects the weather fact table to `dim_location`.
-
-The `date_id` connects the weather fact table to `dim_date`.
-
-The combination of `location_id` and `date_id` is unique. This prevents the same city's weather data from being inserted more than once for the same date.
-
-The database schema is stored in:
-
-```text
-sql/schema.sql
+default_args={
+    "retries": 2,
+    "retry_delay": timedelta(minutes=5),
+}
 ```
 
-## Installation
+The DAG also uses the `Africa/Johannesburg` timezone.
 
-### 1. Open the project
+These settings provide daily scheduling, prevent overlapping DAG runs and allow failed tasks to retry after temporary errors.
 
-Open the following folder in Visual Studio Code:
+### Successful Airflow Execution
 
-```text
-weather-data-pipeline
-```
+On 22 October 2026, the weather ETL DAG was successfully executed through Apache Airflow.
 
-### 2. Create a virtual environment
+The Airflow dashboard confirmed:
 
-Run:
+| Metric | Result |
+|---|---|
+| DAG | `weather_etl_pipeline` |
+| Execution status | Success |
+| Successful tasks | 4 of 4 |
+| Failed tasks | 0 |
+| Failed DAG runs | 0 |
+| Observed run duration | Approximately 19 seconds |
 
-```powershell
-python -m venv .venv
+The four tasks — `extract_weather`, `transform_weather`, `validate_weather` and `load_weather` — completed successfully during the observed execution.
+
+This confirms successful local workflow orchestration. Continuous unattended scheduling and database idempotency remain separate reliability considerations.
+
+## Apache Airflow Installation and Setup
+
+Airflow runs inside Ubuntu through WSL2 rather than directly inside native Windows PowerShell.
+
+### 1. Open Ubuntu
+
+Open the Ubuntu terminal from the Windows Start menu.
+
+### 2. Navigate to the Airflow directory
+
+```bash
+cd ~/airflow-project
 ```
 
 ### 3. Activate the virtual environment
 
-In Windows PowerShell, run:
+```bash
+source airflow_venv/bin/activate
+```
+
+### 4. Configure Airflow Home
+
+```bash
+export AIRFLOW_HOME=~/airflow-project/airflow
+```
+
+### 5. Start Apache Airflow
+
+```bash
+airflow standalone
+```
+
+For convenience, these commands can be grouped into a custom shell function named `start-airflow`.
+
+### 6. Open the Airflow dashboard
+
+Open the following address in a browser:
+
+http://localhost:8080
+
+Sign in using the locally configured Airflow credentials.
+
+### 7. Run the DAG
+
+In the Airflow interface:
+
+1. Select **Dags**.
+2. Open `weather_etl_pipeline`.
+3. Click **Trigger** to start a manual DAG run.
+4. Inspect the **Runs** tab for execution progress.
+5. Review individual task logs to diagnose failures.
+
+When the DAG is unpaused and the scheduler is running, Airflow can create scheduled daily runs automatically.
+
+**Local scheduling limitation:** The scheduler must remain running. Shutting down the laptop or stopping Ubuntu/Airflow interrupts automatic execution.
+
+## Running ETL and ELT Manually
+
+The pipelines can also be executed without Airflow using the project's Python virtual environment.
+
+From the project root on Windows:
 
 ```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.venv\Scripts\Activate.ps1
+.\.venv\Scripts\python.exe -m src.python_run_workflows
 ```
 
-When the environment is active, the terminal should display:
+This runs the ETL workflow followed by the ELT workflow.
 
-```text
-(.venv)
-```
+The workflows depend on the Open-Meteo API, installed Python dependencies and correctly configured database paths.
 
-### 4. Install the required packages
+## Database Validation
 
-Run:
+A Python validation script is used to inspect the SQLite database and retrieve table names and record counts.
 
-```powershell
-pip install -r requirements.txt
-```
+During validation, the database contained:
 
-## Running the Pipeline
+| Table | Observed row count |
+|---|---:|
+| `dim_location` | 3 |
+| `dim_date` | 14 |
+| `fact_weather` | 42 |
+| `staging_weather_raw` | 3 |
 
-Run the complete ETL pipeline from the main project folder:
+These are observed counts from the local database at the time of inspection, not fixed expected values.
 
-```powershell
-python main.py
-```
+The ETL workflow previously processed 21 transformed records in one execution. Additional records may reflect separate ETL/ELT loads, different forecast periods or repeated execution.
 
-A successful pipeline run should:
+Further source-to-target reconciliation and duplicate-key validation are required to establish whether every stored record is unique and accurate.
 
-1. Extract weather data from Open-Meteo
-2. Save the raw JSON response
-3. Transform the nested data into a DataFrame
-4. Validate the transformed data
-5. Create the SQLite database
-6. Create the star-schema tables
-7. Load the location dimension
-8. Load the date dimension
-9. Load the weather fact table
+## Logging and Monitoring
 
-The terminal should show messages confirming that extraction, transformation, validation, and loading were successful.
+The project uses Python logging and Airflow task logs.
 
-## Expected Output
+Monitored activities include API extraction, transformation, validation, database creation, dimension loading, fact loading, task failures and workflow completion.
 
-The pipeline creates the following outputs:
-
-### Raw JSON file
-
-```text
-data/raw/weather_raw.json
-```
-
-### SQLite database
-
-```text
-data/weather.db
-```
-
-### Database tables
-
-```text
-dim_location
-dim_date
-fact_weather
-```
-
-For three cities and seven forecast days, the expected number of weather fact records is approximately:
-
-```text
-3 cities × 7 days = 21 weather records
-```
-
-## Logging and Error Handling
-
-The project uses Python logging to record important pipeline events.
-
-Logged events include:
-
-* Pipeline start
-* Successful API extraction
-* Successful raw-data saving
-* Successful transformation
-* Successful validation
-* Successful database creation
-* Successful dimension-table loading
-* Successful fact-table loading
-* Pipeline completion
-* API request failures
-* Invalid API responses
-* Validation failures
-* Database errors
-
-The current version displays logging messages in the terminal.
+The Airflow interface provides visibility into DAG runs, task status, execution duration and task-level logs.
 
 ## Testing
 
-The project includes a `tests` folder for pytest unit tests.
+The project includes a `tests` directory intended for pytest-based unit testing.
 
-The planned tests cover:
+The test scope includes transformation logic, required fields, derived measurements, missing values, duplicate records and invalid weather values.
 
-* Transformation logic
-* Required transformed columns
-* Average-temperature calculation
-* Missing-column validation
-* Duplicate-record validation
-* Invalid weather measurement validation
+Tests can be executed using:
 
-Tests can be run using:
-
-```powershell
+```bash
 pytest
 ```
 
-Only state that all tests passed after the test files have been completed and the command runs successfully.
-
-## ELT Workflow
-
-The project brief also requires a simple ELT workflow.
-
-The planned ELT process is:
-
-```text
-Extract raw data
-       ↓
-Load raw data into a staging table
-       ↓
-Transform staged data
-       ↓
-Load final fact and dimension tables
-```
-
-The current working implementation focuses on the ETL process.
-
-The ELT staging-table workflow remains an additional project component to be completed.
-
-## Airflow Limitation
-
-Apache Airflow automation was planned for this project.
-
-However, the project was developed using native Windows, and the local Apache Airflow installation was unsuccessful. Apache Airflow is generally run in a Linux-based environment rather than directly as a standard native Windows application.
-
-The completed pipeline can currently be executed manually using:
-
-```powershell
-python main.py
-```
-
-The working pipeline stages are:
-
-```text
-Extract → Transform → Validate → Load
-```
-
-Airflow automation could be added later using:
-
-* Windows Subsystem for Linux 2
-* Docker Desktop
-* A Linux virtual machine
-* A cloud-based Airflow environment
-
-Airflow automation remains a known limitation and future enhancement of this project.
+A complete passing test-suite result has not yet been verified.
 
 ## Known Limitations
 
-* Apache Airflow was not installed successfully in the native Windows environment
-* The pipeline must currently be started manually
-* The ELT staging workflow still needs to be completed
-* Unit tests must be completed and run successfully
-* The reusable class-based pipeline still needs to be completed
+- Apache Airflow is currently hosted locally through Ubuntu WSL2 and is not continuously available when the machine is switched off.
+- The daily schedule is configured, but sustained unattended execution has not yet been verified.
+- Database idempotency and duplicate prevention require further testing.
+- Source-to-target reconciliation remains to be completed.
+- Complete unit-test coverage and successful test results have not yet been established.
+- Production deployment, external monitoring and automated failure notifications have not yet been implemented.
 
 ## Future Improvements
 
-Future improvements may include:
+- Implement and verify idempotent database loading using appropriate unique constraints and upsert logic.
+- Complete source-to-target reconciliation across ETL, ELT and database tables.
+- Expand automated unit and integration tests.
+- Add structured error alerts and pipeline health notifications.
+- Introduce incremental loading where appropriate.
+- Add more South African cities and historical weather data.
+- Implement a persistent production-grade database.
+- Deploy Airflow and the weather pipeline to an always-running cloud or server environment.
+- Improve execution monitoring, observability and operational documentation.
 
-* Running Apache Airflow through WSL2 or Docker
-* Scheduling the pipeline to run daily
-* Completing the ELT staging-table workflow
-* Completing the reusable pipeline class
-* Adding more South African locations
-* Adding historical weather data
-* Saving logs to a permanent log file
-* Adding more unit tests
-* Deploying the pipeline to a cloud platform
+## Project Status
+
+**Core ETL pipeline:** Completed and successfully executed.
+
+**ELT workflow:** Completed and successfully executed locally.
+
+**SQLite star-schema implementation:** Completed.
+
+**Apache Airflow orchestration:** Successfully implemented and tested through a four-task DAG run.
+
+**Daily scheduling configuration:** Implemented.
+
+**Production reliability:** Further validation and deployment work required.
 
 ## Author
 
 Rosemery Mhlanga
 
-## Project Status
-
-The core ETL pipeline is working successfully.
-
-Completed components:
-
-* API extraction
-* Raw JSON storage
-* Data transformation
-* Data validation
-* SQLite database creation
-* Star-schema implementation
-* Dimension-table loading
-* Fact-table loading
-
-Incomplete components:
-
-* Apache Airflow automation
-* ELT staging workflow
-* Class-based pipeline
-* Complete unit testing
-* Permanent log-file output
-
-This project was developed as part of the AICA Data Engineering Capstone Project.
+Developed as part of the AICA Data Engineering Capstone Project.
