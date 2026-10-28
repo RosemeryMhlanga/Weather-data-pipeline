@@ -98,8 +98,21 @@ def transform_weather_data(raw_data: list[dict]) -> pd.DataFrame:
         + dataframe["temperature_min"]
     ) / 2
 
+    duplicate_mask = dataframe.duplicated(
+    subset=["location_name", "observation_date"],
+    keep=False
+)
+
+    duplicate_count = duplicate_mask.sum()
+
+    if duplicate_count > 0:
+     logging.warning(
+        "Detected %s rows with duplicate location/date keys.",
+        duplicate_count
+    )
+
     dataframe = dataframe.drop_duplicates(
-        subset=["location_name", "observation_date"]
+    subset=["location_name", "observation_date"]
     )
 
     important_columns = [

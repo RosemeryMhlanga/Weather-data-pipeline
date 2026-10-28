@@ -131,35 +131,29 @@ def read_staged_data() -> list[dict]:
         )
         raise
 
+def run_etl_pipeline() -> Path:
+    """Run the complete weather ETL workflow."""
 
-def run_elt_pipeline() -> Path:
-    """Run the complete weather ELT workflow."""
+    logging.info("Weather ETL pipeline started.")
 
-    logging.info("Weather ELT pipeline started.")
-
-    # 1. Extract
+    # 1. Extract weather data
     raw_data = extract_all_locations()
 
-    # 2. Load raw data into staging
-    load_raw_data_to_staging(raw_data)
-
-    # 3. Read and transform staged data
-    staged_data = read_staged_data()
-
-    transformed_data: pd.DataFrame = (
-        transform_weather_data(staged_data)
+    # 2. Transform the extracted data
+    transformed_data: pd.DataFrame = transform_weather_data(
+        raw_data
     )
 
-    # 4. Validate transformed data
+    # 3. Validate transformed data
     validate_weather_data(transformed_data)
 
-    # 5. Load transformed data into final star-schema tables
+    # 4. Load transformed data into final star-schema tables
     database_path = load_weather_data(
         transformed_data
     )
 
     logging.info(
-        "Weather ELT pipeline completed successfully."
+        "Weather ETL pipeline completed successfully."
     )
 
     return database_path
