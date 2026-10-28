@@ -2,6 +2,10 @@ import logging
 import sqlite3
 from pathlib import Path
 
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SCHEMA_PATH = PROJECT_ROOT / "sql" / "schema.sql"
+
 import pandas as pd
 
 
